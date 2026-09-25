@@ -1,78 +1,100 @@
-// 產生「貓咪騎自行車」點字（braille）圖：以向量圖形點陣化，每個字元 2×4 點。
-// 用法：node scripts/gen-banner.mjs > src/banner-art.js
+// 產生「貓咪騎自行車」像素圖。
+// 以向量圖形在 4×4 超取樣下點陣化成 W×H 像素，每個像素是一個調色盤字元；
+// 終端機用半格方塊「▀」顯示（每字元上下兩個像素、各自上色）。
+//
+//   node scripts/gen-banner.mjs            產生 src/banner-art.js
+//   node scripts/gen-banner.mjs --png FILE 另存放大的 PNG（README 用）
+//   node scripts/gen-banner.mjs --preview  在終端機預覽
 
-const W = 156;
-const H = 100;
+import fs from 'node:fs';
+import zlib from 'node:zlib';
 
-// 圖層（後畫的蓋過前面）：每層一張點陣，並記錄顏色
-const LAYERS = ['motion', 'bike', 'wheel', 'tail', 'cat', 'scarf'];
-const grid = Object.fromEntries(LAYERS.map((k) => [k, new Uint8Array(W * H)]));
-const owner = new Int8Array(W * H).fill(-1); // 每點最上層的圖層
+const W = 78;
+const H = 47;
+const OY = 5; // 整張圖往下移，耳朵才不會被切掉
 
-function set(layer, x, y, on = true) {
-  x = Math.round(x);
-  y = Math.round(y);
-  if (x < 0 || y < 0 || x >= W || y >= H) return;
-  const i = y * W + x;
-  if (on) {
-    grid[layer][i] = 1;
-    owner[i] = LAYERS.indexOf(layer);
-  } else {
-    // 挖空：同一點的所有圖層都清掉（眼睛、條紋等細節）
-    for (const k of LAYERS) grid[k][i] = 0;
-    owner[i] = -2;
-  }
-}
+// 調色盤：字元 → xterm 256 色
+const PALETTE = {
+  o: 52, // 輪廓（深棕紅）
+  f: 215, // 毛（橘）
+  s: 166, // 虎斑條紋（深橘）
+  c: 223, // 奶油色（口鼻、胸口、腳掌）
+  w: 231, // 白（眼睛高光）
+  k: 16, // 黑（瞳孔）
+  n: 211, // 粉紅（鼻子、耳內）
+  r: 160, // 圍巾
+  R: 124, // 圍巾暗部
+  b: 33, // 車架
+  B: 25, // 車架暗部
+  d: 237, // 座墊、把手
+  t: 238, // 輪胎
+  m: 247, // 輪框
+  p: 251, // 輪輻
+  h: 244, // 花鼓、齒盤
+  y: 179, // 置物籃
+  Y: 94, // 籃子編織
+  x: 117, // 魚
+  l: 229, // 車燈
+  g: 248, // 地面
+  v: 252, // 速度線
+};
 
-function fillWhere(layer, test, on = true, box = [0, 0, W, H]) {
-  const [x0, y0, x1, y1] = box.map(Math.round);
-  for (let y = Math.max(0, y0); y < Math.min(H, y1); y += 1) {
-    for (let x = Math.max(0, x0); x < Math.min(W, x1); x += 1) {
-      if (test(x + 0.5, y + 0.5)) set(layer, x, y, on);
+const grid = Array.from({ length: H }, () => Array(W).fill('.'));
+
+// 依覆蓋率上色：每像素 4×4 取樣，覆蓋率達門檻就塗上
+function paint(color, inside, box = [0, 0, W, H], threshold = 0.45) {
+  const [x0, y0, x1, y1] = box;
+  for (let y = Math.max(0, Math.floor(y0 + OY)); y < Math.min(H, Math.ceil(y1 + OY)); y += 1) {
+    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, Math.ceil(x1)); x += 1) {
+      let hit = 0;
+      for (let sy = 0; sy < 4; sy += 1) for (let sx = 0; sx < 4; sx += 1) if (inside(x + (sx + 0.5) / 4, y - OY + (sy + 0.5) / 4)) hit += 1;
+      if (hit / 16 >= threshold) grid[y][x] = color;
     }
   }
 }
 
-function distSeg(px, py, ax, ay, bx, by) {
+const px = (color, x, y) => {
+  y += OY;
+  if (x >= 0 && y >= 0 && x < W && y < H) grid[y][x] = color;
+};
+
+function distSeg(x, y, [ax, ay], [bx, by]) {
   const dx = bx - ax;
   const dy = by - ay;
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(x - (ax + t * dx), y - (ay + t * dy));
 }
 
-const line = (layer, [ax, ay], [bx, by], w = 1.2, on = true) =>
-  fillWhere(layer, (x, y) => distSeg(x, y, ax, ay, bx, by) <= w / 2, on, [Math.min(ax, bx) - w, Math.min(ay, by) - w, Math.max(ax, bx) + w + 1, Math.max(ay, by) + w + 1]);
+const box = (pts, pad) => [
+  Math.min(...pts.map((p) => p[0])) - pad,
+  Math.min(...pts.map((p) => p[1])) - pad,
+  Math.max(...pts.map((p) => p[0])) + pad + 1,
+  Math.max(...pts.map((p) => p[1])) + pad + 1,
+];
 
-const ring = (layer, [cx, cy], r, w = 1.2, on = true) =>
-  fillWhere(layer, (x, y) => Math.abs(Math.hypot(x - cx, y - cy) - r) <= w / 2, on, [cx - r - w, cy - r - w, cx + r + w + 1, cy + r + w + 1]);
+const line = (color, a, b, w = 1) => paint(color, (x, y) => distSeg(x, y, a, b) <= w / 2, box([a, b], w), 0.4);
+const disk = (color, [cx, cy], r) => paint(color, (x, y) => Math.hypot(x - cx, y - cy) <= r, box([[cx, cy]], r));
+const ring = (color, [cx, cy], r, w = 1) =>
+  paint(color, (x, y) => Math.abs(Math.hypot(x - cx, y - cy) - r) <= w / 2, box([[cx, cy]], r + w), 0.4);
 
-const disk = (layer, [cx, cy], r, on = true) =>
-  fillWhere(layer, (x, y) => Math.hypot(x - cx, y - cy) <= r, on, [cx - r - 1, cy - r - 1, cx + r + 2, cy + r + 2]);
-
-function ellipse(layer, [cx, cy], rx, ry, deg = 0, on = true) {
+function ellipse(color, [cx, cy], rx, ry, deg = 0) {
   const a = (deg * Math.PI) / 180;
   const cos = Math.cos(a);
   const sin = Math.sin(a);
-  const m = Math.max(rx, ry) + 1;
-  fillWhere(
-    layer,
+  paint(
+    color,
     (x, y) => {
-      const dx = x - cx;
-      const dy = y - cy;
-      const u = dx * cos + dy * sin;
-      const v = -dx * sin + dy * cos;
+      const u = (x - cx) * cos + (y - cy) * sin;
+      const v = -(x - cx) * sin + (y - cy) * cos;
       return (u * u) / (rx * rx) + (v * v) / (ry * ry) <= 1;
     },
-    on,
-    [cx - m, cy - m, cx + m + 1, cy + m + 1],
+    box([[cx, cy]], Math.max(rx, ry)),
   );
 }
 
-function polygon(layer, pts, on = true) {
-  const xs = pts.map((p) => p[0]);
-  const ys = pts.map((p) => p[1]);
-  fillWhere(
-    layer,
+function polygon(color, pts) {
+  paint(
+    color,
     (x, y) => {
       let inside = false;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
@@ -82,212 +104,224 @@ function polygon(layer, pts, on = true) {
       }
       return inside;
     },
-    on,
-    [Math.min(...xs) - 1, Math.min(...ys) - 1, Math.max(...xs) + 2, Math.max(...ys) + 2],
+    box(pts, 0),
   );
 }
 
-// 三次貝茲曲線，寬度可由 w0 漸變到 w1
-function curve(layer, p0, p1, p2, p3, w0 = 2, w1 = w0, on = true) {
-  const steps = 80;
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const mt = 1 - t;
-    const x = mt ** 3 * p0[0] + 3 * mt * mt * t * p1[0] + 3 * mt * t * t * p2[0] + t ** 3 * p3[0];
-    const y = mt ** 3 * p0[1] + 3 * mt * mt * t * p1[1] + 3 * mt * t * t * p2[1] + t ** 3 * p3[1];
-    disk(layer, [x, y], (w0 + (w1 - w0) * t) / 2, on);
+// 三次貝茲曲線（粗細可漸變）
+function curve(color, p0, p1, p2, p3, w0 = 2, w1 = w0) {
+  const pts = [];
+  for (let i = 0; i <= 60; i += 1) {
+    const t = i / 60;
+    const m = 1 - t;
+    pts.push([
+      m ** 3 * p0[0] + 3 * m * m * t * p1[0] + 3 * m * t * t * p2[0] + t ** 3 * p3[0],
+      m ** 3 * p0[1] + 3 * m * m * t * p1[1] + 3 * m * t * t * p2[1] + t ** 3 * p3[1],
+      (w0 + (w1 - w0) * t) / 2,
+    ]);
   }
+  paint(color, (x, y) => pts.some(([cx, cy, r]) => Math.hypot(x - cx, y - cy) <= r), box(pts, Math.max(w0, w1)));
+}
+
+// 在指定顏色的像素外圍描一圈輪廓
+function outline(targets, color = 'o') {
+  const isTarget = (x, y) => x >= 0 && y >= 0 && x < W && y < H && targets.includes(grid[y][x]);
+  const marks = [];
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 0; x < W; x += 1) {
+      if (isTarget(x, y)) continue;
+      if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => isTarget(x + dx, y + dy))) marks.push([x, y]);
+    }
+  }
+  for (const [x, y] of marks) grid[y][x] = color;
 }
 
 // ── 自行車 ───────────────────────────────────────────────
-const R = [34, 75]; // 後輪
-const F = [118, 75]; // 前輪
-const RW = 22;
-const BB = [72, 77]; // 五通
-const SEAT = [62, 44]; // 座管頂
-const HEAD_T = [106, 44]; // 頭管上
-const HEAD_B = [109, 54]; // 頭管下
+const RW = [15, 31]; // 後輪
+const FW = [60, 31]; // 前輪
+const R = 9.5;
+const BB = [36, 32]; // 五通
+const SEAT = [29, 20];
+const HT = [52, 19];
+const HB = [53.5, 24];
 
-for (const c of [R, F]) {
-  ring('wheel', c, RW, 2.2); // 外胎
-  ring('wheel', c, RW - 2.6, 0.9); // 輪框
-  disk('wheel', c, 2.2); // 花鼓
-  for (let k = 0; k < 16; k += 1) {
-    const a = (k / 16) * Math.PI * 2 + (c === R ? 0.1 : 0.3);
-    line('wheel', [c[0] + Math.cos(a) * 2, c[1] + Math.sin(a) * 2], [c[0] + Math.cos(a) * (RW - 3), c[1] + Math.sin(a) * (RW - 3)], 0.6);
+for (const w of [RW, FW]) {
+  for (let k = 0; k < 8; k += 1) {
+    const a = (k / 8) * Math.PI * 2 + 0.2;
+    line('p', w, [w[0] + Math.cos(a) * (R - 1.5), w[1] + Math.sin(a) * (R - 1.5)], 0.7);
   }
+  ring('m', w, R - 1.6, 0.9);
+  ring('t', w, R, 1.9);
+  disk('h', w, 1.3);
 }
-// 車架（菱形）
-line('bike', SEAT, BB, 2.2); // 座管
-line('bike', [SEAT[0] + 1, SEAT[1] + 2], [HEAD_T[0], HEAD_T[1] + 3], 2.2); // 上管
-line('bike', BB, HEAD_B, 2.6); // 下管
-line('bike', BB, R, 1.8); // 後下叉
-line('bike', [SEAT[0] - 1, SEAT[1] + 3], R, 1.6); // 後上叉
-line('bike', HEAD_T, HEAD_B, 3); // 頭管
-curve('bike', HEAD_B, [111, 62], [115, 68], F, 1.8); // 前叉
-// 龍頭與把手（彎把）
-line('bike', HEAD_T, [104, 38], 1.8);
-curve('bike', [104, 38], [110, 37], [117, 37], [118, 42], 1.8);
-curve('bike', [118, 42], [119, 46], [116, 48], [114, 47], 1.6);
-// 座墊與座桿
-line('bike', SEAT, [60, 39], 1.6);
-curve('bike', [50, 38], [56, 35], [64, 35], [69, 38], 2.8);
-// 齒盤、曲柄、踏板、鏈條
-ring('bike', BB, 6, 1.4);
-disk('bike', BB, 2);
-line('bike', BB, [79, 87], 1.8);
-line('bike', [76, 88], [83, 88], 2); // 前踏板
-line('bike', BB, [66, 68], 1.6);
-line('bike', [63, 67], [69, 67], 1.6); // 後踏板
-line('bike', [BB[0], BB[1] - 6], [R[0], R[1] - 3], 0.7); // 鏈條上
-line('bike', [BB[0], BB[1] + 6], [R[0], R[1] + 3], 0.7); // 鏈條下
-ring('bike', R, 3.5, 1);
-// 擋泥板與車燈
-curve('bike', [F[0] - 20, F[1] - 12], [F[0] - 12, F[1] - 26], [F[0] + 12, F[1] - 27], [F[0] + 22, F[1] - 12], 1);
-ellipse('bike', [122, 50], 3, 2.2);
-line('bike', [118, 50], [119, 50], 1);
-for (const [dx, dy] of [[5, -3], [7, 0], [5, 3]]) line('motion', [127, 50 + dy * 0.5], [127 + dx, 50 + dy * 1.4], 0.7); // 燈光
-// 置物籃
-polygon('bike', [[118, 30], [132, 30], [130, 38], [120, 38]]);
-polygon('bike', [[120, 31], [130, 31], [128.6, 37], [121.4, 37]], false);
-for (let x = 121; x < 130; x += 2.5) line('bike', [x, 31], [x + 0.3, 37], 0.6);
-line('bike', [118, 33.5], [132, 33.5], 0.6);
-// 籃子裡的魚
-ellipse('bike', [125, 27], 4.2, 2.2, -12);
-polygon('bike', [[128.5, 26], [133, 22.5], [132.5, 28.5]]);
-disk('bike', [123, 26.4], 0.8, false);
+// 車架
+line('b', SEAT, BB, 1.5);
+line('b', [29.5, 21], [52, 20.5], 1.5);
+line('b', BB, HB, 1.7);
+line('B', BB, RW, 1.2);
+line('B', [29, 21.5], RW, 1.1);
+line('b', HT, HB, 2);
+line('b', HB, FW, 1.3);
+// 齒盤、曲柄、踏板
+ring('h', BB, 2.6, 1);
+line('d', BB, [39, 37], 1.2);
+line('d', [37.5, 37.5], [41.5, 37.5], 1.2);
+// 座墊、龍頭、把手
+line('d', [29, 20], [28.5, 18], 1);
+curve('d', [24, 17.6], [27, 16.4], [31, 16.6], [33, 17.8], 1.8);
+line('d', HT, [51, 15], 1.2);
+curve('d', [51, 15], [54, 14.4], [57, 14.6], [58, 16.8], 1.3);
+// 車燈
+ellipse('l', [59.8, 20.2], 1.4, 1.1);
+for (const [dx, dy] of [[3, -1.2], [3.6, 0], [3, 1.2]]) line('v', [62.4, 20.2 + dy * 0.4], [62.4 + dx, 20.2 + dy * 1.4], 0.7);
+// 置物籃與魚
+polygon('y', [[56, 9.5], [65, 9.5], [64, 14.5], [57, 14.5]]);
+for (const x of [58, 60.3, 62.6]) line('Y', [x, 10], [x - 0.2, 14.4], 0.6);
+line('Y', [56.3, 12], [64.7, 12], 0.6);
+ellipse('x', [60.5, 8.2], 3, 1.5, -10);
+polygon('x', [[63, 7.6], [65.6, 5.2], [65.4, 9.4]]);
+px('k', 59, 8);
 
 // ── 動態線與地面 ─────────────────────────────────────────
-for (const [y, x0, x1] of [[52, 2, 14], [58, 0, 9], [64, 3, 11], [46, 6, 16]]) line('motion', [x0, y], [x1, y], 0.8);
-for (let x = 0; x < W; x += 7) line('motion', [x, 98.5], [x + 4, 98.5], 0.8);
-for (const [x, y] of [[8, 95], [14, 92], [20, 96], [5, 90]]) disk('motion', [x, y], 0.9); // 揚起的塵土
+for (const [y, a, b] of [[17, 1, 7], [21, 0, 5], [25, 2, 6]]) line('v', [a, y], [b, y], 0.8);
+for (let x = 0; x < W; x += 5) line('g', [x, 41.4], [x + 2.6, 41.4], 0.9);
+for (const [x, y] of [[4, 38], [7, 36], [2, 35]]) px('g', x, y);
 
-// ── 貓咪 ─────────────────────────────────────────────────
-// 尾巴：從屁股往後翹起捲曲
-curve('tail', [56, 40], [38, 44], [26, 32], [30, 20], 4.2, 3.2);
-curve('tail', [30, 20], [32, 12], [42, 12], [41, 19], 3.2, 2.2);
-// 身體（向前傾）
-ellipse('cat', [74, 31], 18, 10.5, -14);
-ellipse('cat', [60, 35], 9, 7.5); // 臀部
-// 後腿：大腿 → 膝蓋往前彎 → 小腿 → 腳掌踩在前踏板
-ellipse('cat', [68, 42], 9, 6.5, 35);
-curve('cat', [70, 45], [76, 50], [82, 56], [84, 62], 6, 4.6);
-curve('cat', [84, 62], [84, 70], [82, 78], [81, 84], 4.4, 3.4);
-ellipse('cat', [82, 86], 3.8, 2.3);
-curve('cat', [82, 56], [84.5, 59], [85.5, 62], [85, 65], 0.7, 0.7, false); // 膝蓋線
-// 另一隻後腿（遠側，踩後踏板）
-curve('cat', [62, 44], [60, 52], [63, 60], [66, 65], 3.4, 2.8);
-ellipse('cat', [66.5, 65.5], 3, 1.8);
-// 前腳：伸向把手，腳掌握住把手
-curve('cat', [84, 30], [94, 34], [104, 38], [112, 39], 4.4, 3.6);
-disk('cat', [114, 39.5], 2.7);
-curve('cat', [86, 34], [95, 40], [104, 43], [115, 46], 3.4, 2.8);
-disk('cat', [116, 46.5], 2.3);
+// ── 貓咪（Q 版大頭）──────────────────────────────────────
+// 尾巴：從屁股往後上方翹起、尾端捲一圈
+curve('f', [27, 17], [19, 18], [15, 12], [17, 6], 3.2, 2.6);
+curve('f', [17, 6], [18, 2.5], [23, 2.5], [22.5, 6], 2.6, 2);
+// 身體（前傾）、臀部
+ellipse('f', [35, 14.5], 9, 5.6, -14);
+ellipse('f', [28.8, 16], 4.6, 3.8);
+// 遠側後腿（踩後方踏板）
+curve('f', [30, 19], [30, 22], [31, 25], [32.5, 27], 2.4, 2);
+ellipse('c', [33, 27.5], 1.6, 1);
+// 近側後腿：大腿 → 膝蓋 → 小腿 → 腳掌踩在前踏板
+ellipse('f', [33, 19.5], 4.2, 3.2, 30);
+curve('f', [34, 21], [37, 23.5], [39.5, 26], [40, 29], 3.2, 2.6);
+curve('f', [40, 29], [40.2, 31.5], [39.8, 34], [39.5, 35.5], 2.4, 2);
+ellipse('c', [40, 36.2], 1.9, 1.1);
+// 前腳：伸向把手
+curve('f', [40, 14.5], [45, 16], [50, 16.5], [54.5, 16], 2.8, 2.4);
+disk('c', [55.6, 16], 1.5);
 // 頭
-disk('cat', [96, 19], 12.5);
-ellipse('cat', [101, 25], 8, 5.6); // 口鼻
-ellipse('cat', [86, 24], 4, 3, 30); // 腮毛
-polygon('cat', [[85, 16], [84.5, 1], [94.5, 9]]); // 左耳
-polygon('cat', [[99, 8], [107, -1], [109, 14]]); // 右耳
-polygon('cat', [[87, 12.5], [87.2, 5], [92, 9.5]], false); // 耳內
-polygon('cat', [[101.5, 8.5], [106, 3.5], [107, 11.5]], false);
-line('cat', [89, 8], [89.5, 11], 0.6); // 耳毛
-line('cat', [104.5, 6.5], [104.5, 9.5], 0.6);
-// 眼睛（挖空）、瞳孔與高光
-ellipse('cat', [92.5, 18], 3, 3.6, 0, false);
-ellipse('cat', [103, 18], 3, 3.6, 0, false);
-ellipse('cat', [93.4, 18.8], 1.6, 2.4);
-ellipse('cat', [103.9, 18.8], 1.6, 2.4);
-disk('cat', [94.1, 17.6], 0.6, false);
-disk('cat', [104.6, 17.6], 0.6, false);
-curve('cat', [89, 13.5], [91, 12.5], [94, 12.5], [96, 14], 0.7, 0.7, false); // 眉
-curve('cat', [100, 14], [102, 12.5], [105, 12.5], [107, 13.5], 0.7, 0.7, false);
-// 鼻子、嘴巴
-polygon('cat', [[99.8, 23.2], [104.6, 23.2], [102.2, 26]], false);
-curve('cat', [102.2, 26], [102.2, 28.4], [99.8, 29.2], [98.2, 27.8], 0.8, 0.8, false);
-curve('cat', [102.2, 26], [102.4, 28.4], [104.8, 29.2], [106.2, 27.8], 0.8, 0.8, false);
-ellipse('cat', [102.6, 30.2], 1.4, 0.9, 0, false); // 小舌頭
-// 臉頰紅暈（挖小點）
-for (const [x, y] of [[95, 25], [96.5, 26], [95.5, 27]]) disk('cat', [x, y], 0.45, false); // 鬍鬚點
-// 鬍鬚
-for (const [a, b] of [[[109, 24], [124, 20]], [[109, 26], [125, 26]], [[109, 28], [123, 31.5]]]) line('cat', a, b, 0.6);
-for (const [a, b] of [[[83, 22], [75, 19.5]], [[83, 25], [74, 25.5]]]) line('cat', a, b, 0.6);
-// 虎斑條紋（挖空）
-for (const [x, y, d] of [[70, 23, 70], [76, 22, 75], [82, 24, 78], [64, 27, 60], [58, 31, 50]]) ellipse('cat', [x, y], 4.2, 0.6, d, false);
-for (const [x, y] of [[93, 8.5], [96.5, 8], [100, 8.5]]) line('cat', [x, y], [x, y + 3.2], 0.8, false); // 額頭
-for (const [a, b] of [[[31, 34], [36, 31]], [[28, 26], [34, 25]], [[33, 17], [37, 20]]]) line('tail', a, b, 0.9, false);
-// 前腳與身體的分界
-curve('cat', [84, 31], [88, 33], [92, 35], [96, 36.5], 0.7, 0.7, false);
+disk('f', [46, 9], 7.2);
+ellipse('f', [40.6, 11.5], 2.2, 1.8, 20); // 腮毛
+polygon('f', [[39, 6.5], [39.2, -3.6], [44.8, 2.6]]); // 左耳
+polygon('f', [[47.6, 2.4], [53.4, -3.6], [53.4, 6.4]]); // 右耳
+polygon('n', [[40.6, 4], [40.8, -0.8], [43.4, 2.6]]); // 耳內
+polygon('n', [[49.2, 2.6], [52, -0.8], [52, 4.4]]);
+// 胸口與口鼻（奶油色）
+ellipse('c', [41.6, 15.2], 2.6, 2, -20);
+ellipse('c', [47.6, 11.6], 3.4, 2.1);
+// 虎斑條紋
+for (const [x, y] of [[44, 3.4], [46, 3], [48, 3.4]]) line('s', [x, y], [x, y + 1.6], 0.9);
+for (const [a, b] of [[[32, 10], [33.5, 12.5]], [[35.5, 9.4], [36.8, 12]], [[29, 12.4], [30.4, 14.8]]]) line('s', a, b, 1);
+for (const [a, b] of [[[16, 9.5], [18.8, 10.5]], [[15.4, 13], [18.2, 13.6]], [[19.5, 4], [21.2, 5.6]]]) line('s', a, b, 1);
+line('s', [38.5, 29], [41, 28.6], 0.9);
+// 圍巾：繞在脖子上，尾端隨風飄向後方
+curve('r', [38.8, 12.6], [41, 14.4], [45, 14.8], [48, 14], 2.2);
+curve('r', [39.5, 13.2], [35, 11.5], [31, 8], [26, 8.5], 2.1, 1.7);
+curve('R', [38.6, 13.8], [35, 14], [32, 12], [28.5, 12.6], 1.6, 1.3);
 
-// ── 圍巾（隨風飄向後方）──────────────────────────────────
-curve('scarf', [86, 27], [89, 31], [95, 32], [100, 31], 3.2);
-curve('scarf', [86, 28], [76, 26], [66, 18], [52, 17], 3, 2.2);
-curve('scarf', [86, 29], [76, 30], [68, 25], [56, 25], 2.6, 1.8);
-for (const x of [60, 70]) line('scarf', [x, 15.5], [x + 1, 20], 0.8, false); // 圍巾條紋
-for (const x of [64]) line('scarf', [x, 23], [x + 1, 27], 0.8, false);
-for (const dy of [-2, 0, 2]) line('scarf', [52, 17 + dy * 0.6], [48.5, 17 + dy * 1.3], 0.6); // 流蘇
-for (const dy of [-1.5, 0, 1.5]) line('scarf', [56, 25 + dy * 0.6], [52.5, 25 + dy * 1.3], 0.6);
+// 輪廓：貓、尾巴、圍巾外圍描深色邊
+outline(['f', 's', 'c', 'n', 'r', 'R']);
 
-// ── 轉成點字 ─────────────────────────────────────────────
-const DOT = [
-  [0x01, 0x08],
-  [0x02, 0x10],
-  [0x04, 0x20],
-  [0x40, 0x80],
-];
-
-const rows = [];
-for (let cy = 0; cy < H; cy += 4) {
-  const segs = [];
-  for (let cx = 0; cx < W; cx += 2) {
-    let bits = 0;
-    const votes = {};
-    for (let dy = 0; dy < 4; dy += 1) {
-      for (let dx = 0; dx < 2; dx += 1) {
-        const x = cx + dx;
-        const y = cy + dy;
-        if (y >= H) continue;
-        const i = y * W + x;
-        if (owner[i] >= 0 && grid[LAYERS[owner[i]]][i]) {
-          bits |= DOT[dy][dx];
-          const k = LAYERS[owner[i]];
-          votes[k] = (votes[k] || 0) + 1 + LAYERS.indexOf(k) * 0.01;
-        }
-      }
-    }
-    const color = bits ? Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0] : '';
-    // 空白格也用點字空白（U+2800），在各種字型下寬度才一致
-    const ch = String.fromCodePoint(0x2800 + bits);
-    const last = segs[segs.length - 1];
-    if (last && (last[0] === color || !bits)) last[1] += ch;
-    else segs.push([color, ch]);
-  }
-  // 去掉行尾空白
-  const BLANK = /\u2800+$/;
-  while (segs.length && /^\u2800*$/.test(segs[segs.length - 1][1])) segs.pop();
-  if (segs.length) segs[segs.length - 1][1] = segs[segs.length - 1][1].replace(BLANK, '');
-  rows.push(segs);
+// 眼睛（2×2 黑眼珠 + 白色高光）、鼻子、嘴巴、鬍鬚：畫在輪廓之後
+for (const ex of [43, 48]) {
+  px('k', ex, 8);
+  px('k', ex + 1, 8);
+  px('k', ex, 9);
+  px('k', ex + 1, 9);
+  px('w', ex, 8);
 }
-while (rows.length && !rows[0].length) rows.shift();
-while (rows.length && !rows[rows.length - 1].length) rows.pop();
+px('n', 46, 11);
+px('n', 47, 11);
+px('o', 46, 12);
+px('o', 47, 12);
+px('o', 45, 13);
+px('o', 48, 13);
+// 鬍鬚（逐點畫，左右各兩根）
+for (const [x, y] of [[55, 10], [56, 10], [57, 9], [58, 9], [55, 12], [56, 12], [57, 13], [58, 13]]) px('o', x, y);
+for (const [x, y] of [[36, 10], [35, 10], [34, 9], [36, 12], [35, 12], [34, 13]]) px('o', x, y);
 
-if (process.argv.includes('--ppm')) {
-  // 除錯用：輸出放大 4 倍的彩色點陣圖（PPM）
-  const S = 4;
-  const RGB = { motion: [150, 150, 150], bike: [40, 140, 200], wheel: [70, 70, 70], tail: [230, 130, 80], cat: [240, 150, 90], scarf: [210, 50, 60] };
-  const out = Buffer.alloc(W * S * H * S * 3, 255);
-  for (let y = 0; y < H * S; y += 1) {
-    for (let x = 0; x < W * S; x += 1) {
-      const i = Math.floor(y / S) * W + Math.floor(x / S);
-      if (owner[i] >= 0 && grid[LAYERS[owner[i]]][i]) out.set(RGB[LAYERS[owner[i]]], (y * W * S + x) * 3);
+// ── 輸出 ─────────────────────────────────────────────────
+const rows = grid.map((r) => r.join('').replace(/\.+$/, ''));
+while (rows.length && rows[rows.length - 1] === '') rows.pop();
+while (rows.length && rows[0] === '') rows.shift();
+
+function xtermRgb(n) {
+  const base = [[0, 0, 0], [128, 0, 0], [0, 128, 0], [128, 128, 0], [0, 0, 128], [128, 0, 128], [0, 128, 128], [192, 192, 192], [128, 128, 128], [255, 0, 0], [0, 255, 0], [255, 255, 0], [0, 0, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255]];
+  if (n < 16) return base[n];
+  if (n >= 232) {
+    const v = 8 + (n - 232) * 10;
+    return [v, v, v];
+  }
+  const i = n - 16;
+  const lv = [0, 95, 135, 175, 215, 255];
+  return [lv[Math.floor(i / 36)], lv[Math.floor(i / 6) % 6], lv[i % 6]];
+}
+
+function crc32(buf) {
+  let c = ~0;
+  for (const b of buf) {
+    c ^= b;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+  }
+  return ~c >>> 0;
+}
+
+// 透明背景 PNG，每個像素放大 scale 倍
+function png(scale = 8) {
+  const w = W * scale;
+  const h = rows.length * scale;
+  const stride = w * 4 + 1;
+  const raw = Buffer.alloc(stride * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const ch = rows[Math.floor(y / scale)][Math.floor(x / scale)] ?? '.';
+      if (!(ch in PALETTE)) continue;
+      const o = y * stride + 1 + x * 4;
+      raw.set([...xtermRgb(PALETTE[ch]), 255], o);
     }
   }
-  process.stdout.write(Buffer.concat([Buffer.from(`P6 ${W * S} ${H * S} 255\n`), out]));
-} else if (process.argv.includes('--preview')) {
-  for (const r of rows) console.log(r.map((s) => s[1]).join(''));
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+const args = process.argv.slice(2);
+if (args[0] === '--png') {
+  fs.writeFileSync(args[1], png(Number(args[2]) || 8));
+} else if (args[0] === '--preview') {
+  const { renderPixels } = await import('../src/banner.js');
+  console.log(renderPixels(rows, PALETTE).join('\n'));
 } else {
-  console.log('// 由 scripts/gen-banner.mjs 產生，請勿手動修改。');
-  console.log('// 每列是 [圖層, 點字文字] 片段；圖層決定顏色。');
-  console.log(`export const ART_WIDTH = ${W / 2};`);
-  console.log(`export const ART = ${JSON.stringify(rows)};`);
+  const out = [
+    '// 由 scripts/gen-banner.mjs 產生，請勿手動修改。',
+    '// 每個字元是一個像素，對應 PALETTE 的 xterm 256 色；「.」為透明。',
+    `export const ART_WIDTH = ${W};`,
+    `export const PALETTE = ${JSON.stringify(PALETTE)};`,
+    'export const PIXELS = [',
+    ...rows.map((r) => `  ${JSON.stringify(r)},`),
+    '];',
+    '',
+  ];
+  fs.writeFileSync(new URL('../src/banner-art.js', import.meta.url), out.join('\n'));
 }
