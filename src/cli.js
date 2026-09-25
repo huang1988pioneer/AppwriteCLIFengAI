@@ -15,6 +15,7 @@ import {
   saveConfig,
   DEFAULT_BASE_URL,
 } from './config.js';
+import { printBanner } from './banner.js';
 import { computeDashboard } from './dashboard.js';
 import { parseCsv, toCsv } from './csv.js';
 import { c, convertToTWD, dateOnly, formatMoney, pad, renderTable, strWidth, toYmd } from './format.js';
@@ -119,6 +120,7 @@ export async function main(argv) {
   try {
     const [cmd, ...rest] = positionals;
     if (flags.help || cmd === 'help') {
+      printBanner(flags);
       printHelp(cmd === 'help' ? rest[0] : cmd);
       return 0;
     }
@@ -645,6 +647,7 @@ async function cmdHome(ctx) {
     printJson({ ...stats, errors });
     return errors.length === DASHBOARD_MODULES.length ? 1 : 0;
   }
+  printBanner(ctx.flags);
   printDashboard(stats, errors, ctx.flags.full);
   return 0;
 }

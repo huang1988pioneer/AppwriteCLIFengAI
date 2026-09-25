@@ -1,6 +1,7 @@
 // 互動模式：對應網頁版的導覽列（鋒兄首頁／鋒兄管理／鋒兄工具／設定）。
 
 import { dispatch, loadDashboard, loadSorted, printDashboard, printItem, printModuleTable, promptFields } from './cli.js';
+import { printBanner } from './banner.js';
 import { c } from './format.js';
 import { GROUPS, MODULES, findModule, itemId, itemTitle } from './modules.js';
 import { ask, choose, confirm } from './prompt.js';
@@ -8,6 +9,7 @@ import { buildCreatePayload, buildUpdatePayload, matchesSearch } from './records
 
 export async function runInteractive(ctx) {
   const base = { ...ctx, flags: { ...ctx.flags } };
+  printBanner();
   console.log(`${c.accent('⌘')} ${c.bold('FENGBRO')} ${c.gray(`鋒兄AI Appwrite CLI · ${ctx.conn.profileName} · ${ctx.conn.baseUrl}`)}`);
   await guard(() => showHome(base));
   for (;;) {

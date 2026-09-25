@@ -1,3 +1,15 @@
+```
+         /\_/\
+        ( o.o )  ~
+         > ^ <\___
+        /|   |    \
+  ___  / |___|  ___\
+ / _ \/_______\/ _ \
+| (_) |       | (_) |
+ \___/         \___/
+   貓米騎自行車
+```
+
 # fengbro — 鋒兄AI Appwrite CLI 版
 
 把網頁版 [鋒兄AI Appwrite](https://fengbroaiappwrite.vercel.app/) 改造成終端機工具。
