@@ -1,0 +1,22 @@
+{
+  "name": "appwrite-cli-fengai",
+  "version": "2026.9.25",
+  "description": "鋒兄AI Appwrite 的 CLI 版本：在終端機管理訂閱、食品、額度、銀行等模組",
+  "type": "module",
+  "bin": {
+    "fengbro": "bin/fengbro.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node bin/fengbro.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "MIT"
+}
