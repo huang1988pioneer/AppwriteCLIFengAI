@@ -1,4 +1,4 @@
-// 最上方的橫幅：貓米騎自行車。
+// 最上方的橫幅：貓咪騎自行車。
 // 大圖為點字（braille）圖，由 scripts/gen-banner.mjs 產生；框線仿 STEPcode README 的 **** 標題區塊。
 
 import { createRequire } from 'node:module';
@@ -34,13 +34,14 @@ const SMALL = [
 
 export function banner(columns = process.stdout.columns || 80) {
   if (columns < ART_WIDTH + 2) {
-    return [...SMALL.map((line) => c.accent(line)), `   ${c.bold('貓米騎自行車')}`, ''].join('\n');
+    return [...SMALL.map((line) => c.accent(line)), `   ${c.bold('貓咪騎自行車')}`, ''].join('\n');
   }
   const rule = c.gray('*'.repeat(ART_WIDTH));
   const art = ART.map((row) => row.map(([layer, text]) => (PALETTE[layer] ?? PALETTE[''])(text)).join(''));
   return [
     rule,
-    `${c.bold('貓米騎自行車')} ${c.gray('--')} fengbro v${VERSION} ${c.gray('--')} ${c.gray(REPO)}`,
+    `${c.bold('貓咪騎自行車')} ${c.gray('--')} fengbro v${VERSION}`,
+    c.gray(REPO),
     rule,
     ...art,
     rule,

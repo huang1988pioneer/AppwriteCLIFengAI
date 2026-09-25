@@ -1,6 +1,7 @@
 ```
 ******************************************************************************
-貓米騎自行車 -- fengbro v2026.9.25 -- github.com/huang1988pioneer/AppwriteCLIFengAI
+貓咪騎自行車 -- fengbro v2026.9.25
+github.com/huang1988pioneer/AppwriteCLIFengAI
 ******************************************************************************
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⣀⠀⠀⠀⠀⠀⠀⠀⢀⣴⣇
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡏⠳⣄⣀⣀⣀⣀⣴⠟⡅⣿
@@ -156,5 +157,5 @@ fengbro help sub    # 模組說明
 ```bash
 npm test            # 單元測試 + 端對端測試（使用本機假後端，不會碰到正式資料）
 FENGBRO_DEBUG=1 fengbro …   # 顯示完整錯誤堆疊
-node scripts/gen-banner.mjs > src/banner-art.js   # 重新產生「貓米騎自行車」點字圖（--preview 預覽）
+node scripts/gen-banner.mjs > src/banner-art.js   # 重新產生「貓咪騎自行車」點字圖（--preview 預覽）
 ```
