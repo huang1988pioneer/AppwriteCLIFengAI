@@ -9,6 +9,8 @@ import { buildCreatePayload, buildUpdatePayload, matchesSearch } from './records
 
 export async function runInteractive(ctx) {
   const base = { ...ctx, flags: { ...ctx.flags } };
+  // 進入前清空畫面，游標回到左上角
+  if (process.stdout.isTTY) process.stdout.write('\x1b[2J\x1b[H');
   printBanner();
   console.log(`${c.accent('⌘')} ${c.bold('FENGBRO')} ${c.gray(`鋒兄AI Appwrite CLI · ${ctx.conn.profileName} · ${ctx.conn.baseUrl}`)}`);
   await guard(() => showHome(base));
